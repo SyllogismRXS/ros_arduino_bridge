@@ -24,9 +24,9 @@
     modification, are permitted provided that the following conditions
     are met:
 
-     * Redistributions of source code must retain the above copyright
+    * Redistributions of source code must retain the above copyright
        notice, this list of conditions and the following disclaimer.
-     * Redistributions in binary form must reproduce the above
+       * Redistributions in binary form must reproduce the above
        copyright notice, this list of conditions and the following
        disclaimer in the documentation and/or other materials provided
        with the distribution.
@@ -42,26 +42,26 @@
     CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
     LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
     ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- *********************************************************************/
+    *  POSSIBILITY OF SUCH DAMAGE.
+    *********************************************************************/
 
 //#define USE_BASE      // Enable the base controller code
 #undef USE_BASE     // Disable the base controller code
 
 /* Define the motor controller and encoder library you are using */
 #ifdef USE_BASE
-   /* The Pololu VNH5019 dual motor driver shield */
-   #define POLOLU_VNH5019
+/* The Pololu VNH5019 dual motor driver shield */
+#define POLOLU_VNH5019
 
-   /* The Pololu MC33926 dual motor driver shield */
-   //#define POLOLU_MC33926
+/* The Pololu MC33926 dual motor driver shield */
+//#define POLOLU_MC33926
 
-   /* The RoboGaia encoder shield */
-   #define ROBOGAIA
+/* The RoboGaia encoder shield */
+#define ROBOGAIA
 #endif
 
-//#define USE_SERVOS  // Enable use of PWM servos as defined in servos.h
-#undef USE_SERVOS     // Disable use of PWM servos
+#define USE_SERVOS  // Enable use of PWM servos as defined in servos.h
+//#undef USE_SERVOS     // Disable use of PWM servos
 
 /* Serial port baud rate */
 #define BAUDRATE     57600
@@ -83,33 +83,33 @@
 
 /* Include servo support if required */
 #ifdef USE_SERVOS
-   #include <Servo.h>
-   #include "servos.h"
+#include <Servo.h>
+#include "servos.h"
 #endif
 
 #ifdef USE_BASE
-  /* Motor driver function definitions */
-  #include "motor_driver.h"
+/* Motor driver function definitions */
+#include "motor_driver.h"
 
-  /* Encoder driver function definitions */
-  #include "encoder_driver.h"
+/* Encoder driver function definitions */
+#include "encoder_driver.h"
 
-  /* PID parameters and functions */
-  #include "diff_controller.h"
+/* PID parameters and functions */
+#include "diff_controller.h"
 
-  /* Run the PID loop at 30 times per second */
-  #define PID_RATE           30     // Hz
+/* Run the PID loop at 30 times per second */
+#define PID_RATE           30     // Hz
 
-  /* Convert the rate into an interval */
-  const int PID_INTERVAL = 1000 / PID_RATE;
+/* Convert the rate into an interval */
+const int PID_INTERVAL = 1000 / PID_RATE;
   
-  /* Track the next time we make a PID calculation */
-  unsigned long nextPID = PID_INTERVAL;
+/* Track the next time we make a PID calculation */
+unsigned long nextPID = PID_INTERVAL;
 
-  /* Stop the robot if it hasn't received a movement command
+/* Stop the robot if it hasn't received a movement command
    in this number of milliseconds */
-  #define AUTO_STOP_INTERVAL 2000
-  long lastMotorCommand = AUTO_STOP_INTERVAL;
+#define AUTO_STOP_INTERVAL 2000
+long lastMotorCommand = AUTO_STOP_INTERVAL;
 #endif
 
 /* Variable initialization */
@@ -132,120 +132,183 @@ char argv2[16];
 long arg1;
 long arg2;
 
+/**
+ * Divides a given PWM pin frequency by a divisor.
+ *
+ * The resulting frequency is equal to the base frequency divided by
+ * the given divisor:
+ *   - Base frequencies:
+ *      o The base frequency for pins 3, 9, 10, and 11 is 31250 Hz.
+ *      o The base frequency for pins 5 and 6 is 62500 Hz.
+ *   - Divisors:
+ *      o The divisors available on pins 5, 6, 9 and 10 are: 1, 8, 64,
+ *        256, and 1024.
+ *      o The divisors available on pins 3 and 11 are: 1, 8, 32, 64,
+ *        128, 256, and 1024.
+ *
+ * PWM frequencies are tied together in pairs of pins. If one in a
+ * pair is changed, the other is also changed to match:
+ *   - Pins 5 and 6 are paired on timer0
+ *   - Pins 9 and 10 are paired on timer1
+ *   - Pins 3 and 11 are paired on timer2
+ *
+ * Note that this function will have side effects on anything else
+ * that uses timers:
+ *   - Changes on pins 3, 5, 6, or 11 may cause the delay() and
+ *     millis() functions to stop working. Other timing-related
+ *     functions may also be affected.
+ *   - Changes on pins 9 or 10 will cause the Servo library to function
+ *     incorrectly.
+ *
+ * Thanks to macegr of the Arduino forums for his documentation of the
+ * PWM frequency divisors. His post can be viewed at:
+ *   http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1235060559/0#4
+ */
+/// void setPwmFrequency(int pin, int divisor) {
+///      byte mode;
+///      if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
+///           switch(divisor) {
+///           case 1: mode = 0x01; break;
+///           case 8: mode = 0x02; break;
+///           case 64: mode = 0x03; break;
+///           case 256: mode = 0x04; break;
+///           case 1024: mode = 0x05; break;
+///           default: return;
+///           }
+///           if(pin == 5 || pin == 6) {
+///                TCCR0B = TCCR0B & 0b11111000 | mode;
+///           } else {
+///                TCCR1B = TCCR1B & 0b11111000 | mode;
+///           }
+///      } else if(pin == 3 || pin == 11) {
+///           switch(divisor) {
+///           case 1: mode = 0x01; break;
+///           case 8: mode = 0x02; break;
+///           case 32: mode = 0x03; break;
+///           case 64: mode = 0x04; break;
+///           case 128: mode = 0x05; break;
+///           case 256: mode = 0x06; break;
+///           case 1024: mode = 0x7; break;
+///           default: return;
+///           }
+///           TCCR2B = TCCR2B & 0b11111000 | mode;
+///      }
+/// }
+
 /* Clear the current command parameters */
 void resetCommand() {
-  cmd = NULL;
-  memset(argv1, 0, sizeof(argv1));
-  memset(argv2, 0, sizeof(argv2));
-  arg1 = 0;
-  arg2 = 0;
-  arg = 0;
-  index = 0;
+     cmd = NULL;
+     memset(argv1, 0, sizeof(argv1));
+     memset(argv2, 0, sizeof(argv2));
+     arg1 = 0;
+     arg2 = 0;
+     arg = 0;
+     index = 0;
 }
 
 /* Run a command.  Commands are defined in commands.h */
 int runCommand() {
-  int i = 0;
-  char *p = argv1;
-  char *str;
-  int pid_args[4];
-  arg1 = atoi(argv1);
-  arg2 = atoi(argv2);
+     int i = 0;
+     char *p = argv1;
+     char *str;
+     int pid_args[4];
+     arg1 = atoi(argv1);
+     arg2 = atoi(argv2);
   
-  switch(cmd) {
-  case GET_BAUDRATE:
-    Serial.println(BAUDRATE);
-    break;
-  case ANALOG_READ:
-    Serial.println(analogRead(arg1));
-    break;
-  case DIGITAL_READ:
-    Serial.println(digitalRead(arg1));
-    break;
-  case ANALOG_WRITE:
-    analogWrite(arg1, arg2);
-    Serial.println("OK"); 
-    break;
-  case DIGITAL_WRITE:
-    if (arg2 == 0) digitalWrite(arg1, LOW);
-    else if (arg2 == 1) digitalWrite(arg1, HIGH);
-    Serial.println("OK"); 
-    break;
-  case PIN_MODE:
-    if (arg2 == 0) pinMode(arg1, INPUT);
-    else if (arg2 == 1) pinMode(arg1, OUTPUT);
-    Serial.println("OK");
-    break;
-  case PING:
-    Serial.println(Ping(arg1));
-    break;
+     switch(cmd) {
+     case GET_BAUDRATE:
+          Serial.println(BAUDRATE);
+          break;
+     case ANALOG_READ:
+          Serial.println(analogRead(arg1));
+          break;
+     case DIGITAL_READ:
+          Serial.println(digitalRead(arg1));
+          break;
+     case ANALOG_WRITE:
+          analogWrite(arg1, arg2);
+          Serial.println("OK"); 
+          break;
+     case DIGITAL_WRITE:
+          if (arg2 == 0) digitalWrite(arg1, LOW);
+          else if (arg2 == 1) digitalWrite(arg1, HIGH);
+          Serial.println("OK"); 
+          break;
+     case PIN_MODE:
+          if (arg2 == 0) pinMode(arg1, INPUT);
+          else if (arg2 == 1) pinMode(arg1, OUTPUT);
+          Serial.println("OK");
+          break;
+     case PING:
+          Serial.println(Ping(arg1));
+          break;
 #ifdef USE_SERVOS
-  case SERVO_WRITE:
-    servos[arg1].write(arg2);
-    Serial.println("OK");
-    break;
-  case SERVO_READ:
-    Serial.println(servos[arg1].read());
-    break;
+     case SERVO_WRITE:
+          servos[arg1].write(arg2);
+          Serial.println("OK");
+          break;
+     case SERVO_READ:
+          Serial.println(servos[arg1].read());
+          break;
 #endif
     
 #ifdef USE_BASE
-  case READ_ENCODERS:
-    Serial.print(readEncoder(LEFT));
-    Serial.print(" ");
-    Serial.println(readEncoder(RIGHT));
-    break;
-   case RESET_ENCODERS:
-    resetEncoders();
-    resetPID();
-    Serial.println("OK");
-    break;
-  case MOTOR_SPEEDS:
-    /* Reset the auto stop timer */
-    lastMotorCommand = millis();
-    if (arg1 == 0 && arg2 == 0) {
-      setMotorSpeeds(0, 0);
-      moving = 0;
-    }
-    else moving = 1;
-    leftPID.TargetTicksPerFrame = arg1;
-    rightPID.TargetTicksPerFrame = arg2;
-    Serial.println("OK"); 
-    break;
-  case UPDATE_PID:
-    while ((str = strtok_r(p, ":", &p)) != '\0') {
-       pid_args[i] = atoi(str);
-       i++;
-    }
-    Kp = pid_args[0];
-    Kd = pid_args[1];
-    Ki = pid_args[2];
-    Ko = pid_args[3];
-    Serial.println("OK");
-    break;
+     case READ_ENCODERS:
+          Serial.print(readEncoder(LEFT));
+          Serial.print(" ");
+          Serial.println(readEncoder(RIGHT));
+          break;
+     case RESET_ENCODERS:
+          resetEncoders();
+          resetPID();
+          Serial.println("OK");
+          break;
+     case MOTOR_SPEEDS:
+          /* Reset the auto stop timer */
+          lastMotorCommand = millis();
+          if (arg1 == 0 && arg2 == 0) {
+               setMotorSpeeds(0, 0);
+               moving = 0;
+          }
+          else moving = 1;
+          leftPID.TargetTicksPerFrame = arg1;
+          rightPID.TargetTicksPerFrame = arg2;
+          Serial.println("OK"); 
+          break;
+     case UPDATE_PID:
+          while ((str = strtok_r(p, ":", &p)) != '\0') {
+               pid_args[i] = atoi(str);
+               i++;
+          }
+          Kp = pid_args[0];
+          Kd = pid_args[1];
+          Ki = pid_args[2];
+          Ko = pid_args[3];
+          Serial.println("OK");
+          break;
 #endif
-  default:
-    Serial.println("Invalid Command");
-    break;
-  }
+     default:
+          Serial.println("Invalid Command");
+          break;
+     }
 }
 
 /* Setup function--runs once at startup. */
 void setup() {
-  Serial.begin(BAUDRATE);
+     Serial.begin(BAUDRATE);
 
 // Initialize the motor controller if used */
 #ifdef USE_BASE
-  initMotorController();
-  resetPID();
+     initMotorController();
+     resetPID();
 #endif
 
 /* Attach servos if used */
-#ifdef USE_SERVOS
-  int i;
-  for (i = 0; i < N_SERVOS; i++) {
-    servos[i].attach(servoPins[i]);
-  }
+#ifdef USE_SERVOS     
+     int i;
+     for (i = 0; i < N_SERVOS; i++) {
+          servos[i].attach(servoPins[i]);
+     }     
 #endif
 }
 
@@ -254,58 +317,58 @@ void setup() {
    interval and check for auto-stop conditions.
 */
 void loop() {
-  while (Serial.available() > 0) {
+     while (Serial.available() > 0) {
     
-    // Read the next character
-    chr = Serial.read();
+          // Read the next character
+          chr = Serial.read();
 
-    // Terminate a command with a CR
-    if (chr == 13) {
-      if (arg == 1) argv1[index] = NULL;
-      else if (arg == 2) argv2[index] = NULL;
-      runCommand();
-      resetCommand();
-    }
-    // Use spaces to delimit parts of the command
-    else if (chr == ' ') {
-      // Step through the arguments
-      if (arg == 0) arg = 1;
-      else if (arg == 1)  {
-        argv1[index] = NULL;
-        arg = 2;
-        index = 0;
-      }
-      continue;
-    }
-    else {
-      if (arg == 0) {
-        // The first arg is the single-letter command
-        cmd = chr;
-      }
-      else if (arg == 1) {
-        // Subsequent arguments can be more than one character
-        argv1[index] = chr;
-        index++;
-      }
-      else if (arg == 2) {
-        argv2[index] = chr;
-        index++;
-      }
-    }
-  }
+          // Terminate a command with a CR
+          if (chr == 13) {
+               if (arg == 1) argv1[index] = NULL;
+               else if (arg == 2) argv2[index] = NULL;
+               runCommand();
+               resetCommand();
+          }
+          // Use spaces to delimit parts of the command
+          else if (chr == ' ') {
+               // Step through the arguments
+               if (arg == 0) arg = 1;
+               else if (arg == 1)  {
+                    argv1[index] = NULL;
+                    arg = 2;
+                    index = 0;
+               }
+               continue;
+          }
+          else {
+               if (arg == 0) {
+                    // The first arg is the single-letter command
+                    cmd = chr;
+               }
+               else if (arg == 1) {
+                    // Subsequent arguments can be more than one character
+                    argv1[index] = chr;
+                    index++;
+               }
+               else if (arg == 2) {
+                    argv2[index] = chr;
+                    index++;
+               }
+          }
+     }
   
 // If we are using base control, run a PID calculation at the appropriate intervals
 #ifdef USE_BASE
-  if (millis() > nextPID) {
-    updatePID();
-    nextPID += PID_INTERVAL;
-  }
+     if (millis() > nextPID) {
+          updatePID();
+          nextPID += PID_INTERVAL;
+     }
   
-  // Check to see if we have exceeded the auto-stop interval
-  if ((millis() - lastMotorCommand) > AUTO_STOP_INTERVAL) {;
-    setMotorSpeeds(0, 0);
-    moving = 0;
-  }
+     // Check to see if we have exceeded the auto-stop interval
+     if ((millis() - lastMotorCommand) > AUTO_STOP_INTERVAL) {;
+          setMotorSpeeds(0, 0);
+          moving = 0;
+     }
 
 #endif
 }
