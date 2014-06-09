@@ -161,7 +161,7 @@ class ArduinoROS():
             r.sleep()
     
     # Service callback functions
-    def ServoWriteHandler(self, req):
+    def ServoWriteHandler(self, req):        
         self.controller.servo_write(req.id, req.value)
         return ServoWriteResponse()
     
